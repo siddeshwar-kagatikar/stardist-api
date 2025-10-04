@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+stardist
+csbdeep
+scikit-image
+matplotlib
+numpy
+tensorflow
