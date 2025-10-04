@@ -1,53 +1,68 @@
-from fastapi import FastAPI, UploadFile, File
+import io
+import logging
+from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from stardist.models import StarDist2D
 from csbdeep.utils import normalize
-from skimage import io
+from skimage.io import imread
+from skimage import img_as_ubyte
 import numpy as np
-import os
+from PIL import Image
+
+# 🧩 Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
-# Enable CORS
+# 🟢 Allow CORS (for frontend)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # you can restrict to your frontend domain later
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Load model
-model = StarDist2D.from_pretrained('2D_versatile_he')
+# 🧠 Load model once
+logger.info("Loading StarDist2D model...")
+model = StarDist2D.from_pretrained("2D_versatile_he")
+logger.info("✅ Model loaded successfully")
 
 @app.get("/")
-def root():
+def home():
     return {"message": "StarDist API is running!"}
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
-        # Read and decode image
-        image_data = await file.read()
-        np_img = io.imread(image_data, plugin='imageio')
-        if np_img.shape[-1] == 4:
-            np_img = np_img[..., :3]
+        logger.info(f"📥 Received file: {file.filename}")
 
-        # Predict
-        labels, _ = model.predict_instances(normalize(np_img))
-        binary_mask = np.zeros_like(labels, dtype=np.uint8)
-        binary_mask[labels > 0] = 255
+        contents = await file.read()
+        image = imread(io.BytesIO(contents))
+        logger.info(f"Image shape: {image.shape}")
 
-        # Save result temporarily
-        output_path = f"/tmp/{file.filename}_mask.png"
-        io.imsave(output_path, binary_mask)
+        # Normalize and predict
+        img_norm = normalize(image, 1, 99.8)
+        labels, _ = model.predict_instances(img_norm)
+        logger.info("✅ Prediction complete")
 
-        # Return the mask as base64 image
-        import base64
-        with open(output_path, "rb") as img_file:
-            encoded = base64.b64encode(img_file.read()).decode("utf-8")
+        # Convert to uint8 grayscale image
+        mask = img_as_ubyte(labels > 0)
+        pil_img = Image.fromarray(mask)
 
-        return {"mask_image": encoded}
+        # Convert to bytes for response
+        buf = io.BytesIO()
+        pil_img.save(buf, format="PNG")
+        buf.seek(0)
+
+        logger.info(f"📤 Sending segmented mask for {file.filename}")
+        return StreamingResponse(buf, media_type="image/png")
 
     except Exception as e:
+        logger.exception(f"❌ Error during prediction: {e}")
         return {"error": str(e)}
