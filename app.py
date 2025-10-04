@@ -1,39 +1,53 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse
-import numpy as np
-import tempfile, os
-from skimage import io
+from fastapi.middleware.cors import CORSMiddleware
 from stardist.models import StarDist2D
 from csbdeep.utils import normalize
+from skimage import io
+import numpy as np
+import os
 
 app = FastAPI()
 
-# Load pretrained model once when server starts
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Load model
 model = StarDist2D.from_pretrained('2D_versatile_he')
+
+@app.get("/")
+def root():
+    return {"message": "StarDist API is running!"}
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
-    # Save uploaded image temporarily
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as temp_file:
-        temp_path = temp_file.name
-        content = await file.read()
-        temp_file.write(content)
+    try:
+        # Read and decode image
+        image_data = await file.read()
+        np_img = io.imread(image_data, plugin='imageio')
+        if np_img.shape[-1] == 4:
+            np_img = np_img[..., :3]
 
-    # Read image
-    img = io.imread(temp_path)
-    if img.shape[-1] == 4:
-        img = img[..., :3]
+        # Predict
+        labels, _ = model.predict_instances(normalize(np_img))
+        binary_mask = np.zeros_like(labels, dtype=np.uint8)
+        binary_mask[labels > 0] = 255
 
-    # Predict nuclei
-    labels, details = model.predict_instances(normalize(img))
+        # Save result temporarily
+        output_path = f"/tmp/{file.filename}_mask.png"
+        io.imsave(output_path, binary_mask)
 
-    # Create binary mask
-    binary_mask = np.zeros_like(labels, dtype=np.uint8)
-    binary_mask[labels > 0] = 255
+        # Return the mask as base64 image
+        import base64
+        with open(output_path, "rb") as img_file:
+            encoded = base64.b64encode(img_file.read()).decode("utf-8")
 
-    # Save output mask
-    output_path = temp_path.replace(".png", "_mask.png")
-    io.imsave(output_path, binary_mask)
+        return {"mask_image": encoded}
 
-    # Return the mask file
-    return FileResponse(output_path, media_type="image/png")
+    except Exception as e:
+        return {"error": str(e)}
