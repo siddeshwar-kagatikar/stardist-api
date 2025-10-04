@@ -6,3 +6,4 @@ scikit-image
 matplotlib
 numpy
 tensorflow
+python-multipart
