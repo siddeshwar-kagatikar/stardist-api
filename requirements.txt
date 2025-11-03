@@ -6,4 +6,11 @@ scikit-image
 matplotlib
 numpy
 tensorflow
+torch
+torchvision
+pillow
+segmentation-models-pytorch
 python-multipart
+albumentations
+albumentations[pytorch]
+opencv-python
