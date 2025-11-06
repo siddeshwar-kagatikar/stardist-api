@@ -14,3 +14,5 @@ python-multipart
 albumentations
 albumentations[pytorch]
 opencv-python
+opencv-python-headless
+cellpose
